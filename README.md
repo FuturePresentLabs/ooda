@@ -76,6 +76,14 @@ Pinned tests: `crates/ooda/src/question.rs`.
   wire-format support was the architectural stress test) now goes through
   `ooda::HttpClient`; the one protocol with no `ooda` equivalent (a
   generic structured-output contract) stays Surf's own, on purpose.
+- **`speedy` migrated too.** Its hand-rolled client — a fixed retry ladder
+  that ignored `Retry-After` — is gone; `DecisionClient` is now a thin
+  wrapper over `ooda::HttpClient`, reqwest dropped entirely. Reading
+  `ooda`'s source surfaced two real bugs speedy had been carrying: it read
+  a choice answer's `confidence` as the chosen action's own probability
+  (it isn't — `ooda`'s `probabilities` field is), and it timed retry
+  backoff into its reported latency, which is exactly the fairness gap
+  `Ledger`/`Outcome::elapsed` exist to close.
 - **`transmog` is integrating** its own decision step onto `ooda` next.
 
 ### Scoping a decision to an enum
