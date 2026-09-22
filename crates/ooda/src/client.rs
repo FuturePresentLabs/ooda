@@ -9,6 +9,7 @@
 //! of four.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use crate::error::Error;
 use crate::question::{Answer, Question};
@@ -77,6 +78,21 @@ pub struct Outcome {
     /// it (useful behind a routing alias like `fpl/decide`, where the
     /// nominal request name and the model that resolved it can differ).
     pub resolved_model: Option<String>,
+    /// Wall-clock time the *accepted* attempt's own round trip took, for a
+    /// client that measured a real one ([`crate::HttpClient`]). `None` for
+    /// a client with no real latency to report ([`crate::ScriptedClient`])
+    /// — never a fabricated zero.
+    ///
+    /// Deliberately excludes retry backoff time: a 429/5xx retry reflects
+    /// the endpoint's current load, not the model's decision speed, and a
+    /// benchmark's "time per result" should measure the latter. See
+    /// [`Outcome::retries`] for how many retries preceded this call —
+    /// that information isn't lost, just not folded into the timing.
+    pub elapsed: Option<Duration>,
+    /// How many retries preceded the accepted attempt (`0` = worked first
+    /// try). `None` for a client that doesn't track retries
+    /// ([`crate::ScriptedClient`]).
+    pub retries: Option<u32>,
 }
 
 impl Outcome {
@@ -90,7 +106,25 @@ impl Outcome {
             answers,
             usage,
             resolved_model,
+            elapsed: None,
+            retries: None,
         }
+    }
+
+    /// Returns `self` with `elapsed` set — [`crate::HttpClient`] calls this
+    /// after timing the real round trip; nothing else needs to.
+    #[must_use]
+    pub(crate) fn with_elapsed(mut self, elapsed: Duration) -> Self {
+        self.elapsed = Some(elapsed);
+        self
+    }
+
+    /// Returns `self` with `retries` set — [`crate::HttpClient`] calls this
+    /// after counting how many attempts preceded the accepted one.
+    #[must_use]
+    pub(crate) fn with_retries(mut self, retries: u32) -> Self {
+        self.retries = Some(retries);
+        self
     }
 
     /// The answer to a named question.

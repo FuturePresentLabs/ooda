@@ -53,6 +53,7 @@
 mod best;
 mod choice;
 mod client;
+mod cost;
 mod error;
 mod http;
 mod question;
@@ -63,6 +64,7 @@ mod trace;
 pub use best::RunningBest;
 pub use choice::{ChoiceSpace, Decision, decide_choice, decide_choice_traced};
 pub use client::{Client, Observation, Outcome, Request};
+pub use cost::Ledger;
 pub use error::Error;
 pub use http::{HttpClient, IntoObservation};
 pub use question::{Answer, Criteria, Question, Usage};

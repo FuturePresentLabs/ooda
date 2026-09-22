@@ -1,7 +1,7 @@
 # ooda
 
 [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![tests](https://img.shields.io/badge/tests-37%20passing-brightgreen.svg)](#status)
+[![tests](https://img.shields.io/badge/tests-42%20passing-brightgreen.svg)](#status)
 [![built on](https://img.shields.io/badge/built%20on-typesafe.ai%20Jev-6b46c1.svg)](https://typesafe.ai)
 [![status](https://img.shields.io/badge/status-in%20production-success.svg)](#status)
 
@@ -67,14 +67,16 @@ Pinned tests: `crates/ooda/src/question.rs`.
 
 ## Status
 
-- **Compiled, tested, dogfooded.** `cargo test --workspace` — 37 tests
+- **Compiled, tested, dogfooded.** `cargo test --workspace` — 42 tests
   green.
 - **`legion-of-bom` migrated for real.** Its own `DecisionClient` is
   deleted; it calls `ooda` directly now, and its DRC checks pass end to end
   through the new path.
-- **More consumers next.** `surf` is a good architectural stress test —
-  dual wire-format support, a deterministic-lookup-before-model-call
-  cascade.
+- **`surf` migrated too.** The bounded-choice decision path (its dual
+  wire-format support was the architectural stress test) now goes through
+  `ooda::HttpClient`; the one protocol with no `ooda` equivalent (a
+  generic structured-output contract) stays Surf's own, on purpose.
+- **`transmog` is integrating** its own decision step onto `ooda` next.
 
 ### Scoping a decision to an enum
 
@@ -133,6 +135,15 @@ about the wire format, not a hand-rolled shortcut around it.
   later question's real content depends on an earlier answer. Capped at
   `MAX_STAGES` (16) so a continuation that never stops fails loud instead
   of turning into an unbounded sequence of billed calls.
+- `Ledger` — a running total of usage and latency across a run's calls.
+  `Outcome::elapsed` times only the *accepted* attempt, excluding retry
+  backoff by design: a 429/5xx retry is the endpoint's current load, not
+  the model's decision speed, and a benchmark's time-per-result shouldn't
+  conflate the two. `Outcome::retries` keeps that information around
+  separately rather than dropping it. No dollar conversion here — pricing
+  is a fact about whichever provider actually answered (Jev direct, Laya
+  self-hosted and free at the margin, a gateway with its own rate card),
+  not something this crate should hardcode and let go stale.
 
 ## Out of scope for v1
 
@@ -144,8 +155,9 @@ about the wire format, not a hand-rolled shortcut around it.
   Designed (`Request::with`'s docs), not built — nothing in this ecosystem
   has a decision tree deep enough yet to need it.
 - **A shared bench-harness crate** for CADBench/PCBBench/DFMBench's
-  near-identical rubric shape. Different concern from making one decision —
-  not bundled here.
+  near-identical rubric shape — different concern from making one
+  decision, so not bundled here, but it exists now:
+  [`eval`](https://github.com/FuturePresentLabs/eval).
 - **A generic episode-loop runner.** Real duplication exists elsewhere in
   this ecosystem, but it's internal to one project.
 - **Async.** Every consumer makes a decision call as a synchronous gate

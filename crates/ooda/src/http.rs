@@ -138,10 +138,22 @@ impl HttpClient {
         format!("{}{DECIDE_PATH}", self.base_url)
     }
 
-    fn post(&self, body: &Value) -> Result<(Value, Option<String>), Error> {
+    /// Returns the decoded body, the resolved-model header, how long the
+    /// *accepted* attempt's own round trip took, and how many retries
+    /// preceded it (`0` = worked first try).
+    ///
+    /// Deliberately does not time backoff sleeps into the returned
+    /// duration: a 429/5xx retry is the endpoint's current load, not the
+    /// model's decision speed, and folding that into a latency number
+    /// would make a benchmark's "time per result" measure server capacity
+    /// on the day it happened to run rather than the thing it's supposed
+    /// to measure. `retries` is reported separately so that information
+    /// isn't lost, just not conflated with latency.
+    fn post(&self, body: &Value) -> Result<(Value, Option<String>, Duration, u32), Error> {
         let mut attempt: u32 = 0;
         loop {
             attempt += 1;
+            let call_started = std::time::Instant::now();
             let response = self
                 .http
                 .post(self.endpoint())
@@ -218,7 +230,7 @@ impl HttpClient {
                     source,
                     body: error::truncate(&body_text),
                 })?;
-            return Ok((value, resolved_model));
+            return Ok((value, resolved_model, call_started.elapsed(), attempt - 1));
         }
     }
 }
@@ -230,8 +242,9 @@ impl Client for HttpClient {
             "state": request.observation,
             "questions": request.questions,
         });
-        let (value, resolved_model) = self.post(&body)?;
+        let (value, resolved_model, elapsed, retries) = self.post(&body)?;
         decode_response(&value, resolved_model)
+            .map(|outcome| outcome.with_elapsed(elapsed).with_retries(retries))
     }
 }
 

@@ -367,9 +367,40 @@ pub struct Usage {
     pub output_tokens: u64,
 }
 
+impl std::ops::AddAssign for Usage {
+    fn add_assign(&mut self, other: Self) {
+        self.input_tokens += other.input_tokens;
+        self.output_tokens += other.output_tokens;
+    }
+}
+
+impl std::ops::Add for Usage {
+    type Output = Usage;
+
+    fn add(mut self, other: Self) -> Self {
+        self += other;
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_accumulates_across_calls() {
+        let mut total = Usage::default();
+        total += Usage {
+            input_tokens: 100,
+            output_tokens: 0,
+        };
+        total += Usage {
+            input_tokens: 50,
+            output_tokens: 2,
+        };
+        assert_eq!(total.input_tokens, 150);
+        assert_eq!(total.output_tokens, 2);
+    }
 
     #[test]
     fn choice_criteria_preserves_declaration_order_over_alphabetical() {
