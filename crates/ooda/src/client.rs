@@ -59,7 +59,8 @@ impl Request {
     /// variant in one [`Request`] and keeping only the [`Answer`] matching
     /// the resolved first answer trades wasted compute for one round trip
     /// instead of two — worth it at shallow depth / small branching factor,
-    /// since cost grows as `branching_factor^depth`.
+    /// since cost grows as `branching_factor^depth`. See
+    /// [`crate::decide_speculative`] for exactly this pattern, built.
     #[must_use]
     pub fn with(mut self, name: impl Into<String>, question: Question) -> Self {
         self.questions.insert(name.into(), question);

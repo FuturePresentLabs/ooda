@@ -58,6 +58,7 @@ mod error;
 mod http;
 mod question;
 mod scripted;
+mod speculate;
 mod stage;
 mod trace;
 
@@ -69,6 +70,7 @@ pub use error::Error;
 pub use http::{HttpClient, IntoObservation};
 pub use question::{Answer, Criteria, Question, Usage};
 pub use scripted::ScriptedClient;
+pub use speculate::{Resolved, Speculation, decide_speculative};
 pub use stage::{MAX_STAGES, decide_staged};
 pub use trace::{Kind, Record, Trace};
 

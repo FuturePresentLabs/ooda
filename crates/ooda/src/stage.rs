@@ -11,10 +11,10 @@
 //! shape shows up anywhere a decision tree has a branch worth asking about
 //! rather than pre-fetching.
 //!
-//! This is deliberately *not* the speculative-pre-fetch idea sketched in
-//! [`Request::with`]'s docs (every branch of Q2 asked alongside Q1, keep
-//! only the one that matches) — that trades wasted compute for one round
-//! trip and only pays off at shallow depth/small branching factor.
+//! This is deliberately *not* the speculative-pre-fetch idea — see
+//! [`crate::decide_speculative`] for that one (every branch of Q2 asked
+//! alongside Q1, keep only the one that matches; trades wasted compute for
+//! one round trip, worth it at shallow depth/small branching factor).
 //! Sequential staging here is the plain version: each stage costs a real
 //! call, in exchange for asking only the questions that turn out to matter.
 

@@ -1,7 +1,7 @@
 # ooda
 
 [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![tests](https://img.shields.io/badge/tests-42%20passing-brightgreen.svg)](#status)
+[![tests](https://img.shields.io/badge/tests-45%20passing-brightgreen.svg)](#status)
 [![built on](https://img.shields.io/badge/built%20on-typesafe.ai%20Jev-6b46c1.svg)](https://typesafe.ai)
 [![status](https://img.shields.io/badge/status-in%20production-success.svg)](#status)
 
@@ -67,7 +67,7 @@ Pinned tests: `crates/ooda/src/question.rs`.
 
 ## Status
 
-- **Compiled, tested, dogfooded.** `cargo test --workspace` — 42 tests
+- **Compiled, tested, dogfooded.** `cargo test --workspace` — 45 tests
   green.
 - **`legion-of-bom` migrated for real.** Its own `DecisionClient` is
   deleted; it calls `ooda` directly now, and its DRC checks pass end to end
@@ -143,6 +143,16 @@ about the wire format, not a hand-rolled shortcut around it.
   later question's real content depends on an earlier answer. Capped at
   `MAX_STAGES` (16) so a continuation that never stops fails loud instead
   of turning into an unbounded sequence of billed calls.
+- `decide_speculative` — speculative branch pre-fetch: a root `Choice` plus
+  one follow-up question per possible root answer, all asked in the *same*
+  call. Once the root resolves, the matching branch's answer is already in
+  hand — one round trip instead of two. Not a new wire capability, just
+  `Request::with`'s existing batching used one level deeper; the real work
+  is resolving to the one branch that matches and keeping every discarded
+  branch's answer — real, but never acted on — out of `Trace`, so a
+  low-confidence answer nobody used can't fail `Trace::all_at_least`'s
+  gate. Worth it at shallow depth / small branching factor, same as
+  `decide_staged`'s docs already say — this is that trade, built.
 - `Ledger` — a running total of usage and latency across a run's calls.
   `Outcome::elapsed` times only the *accepted* attempt, excluding retry
   backoff by design: a 429/5xx retry is the endpoint's current load, not
@@ -155,13 +165,6 @@ about the wire format, not a hand-rolled shortcut around it.
 
 ## Out of scope for v1
 
-- **Speculative branch pre-fetch** for a dependent question chain — ask
-  every possible follow-up variant alongside the first question, keep only
-  the one that matches. `decide_staged` covers the plain sequential case
-  (one real call per stage); this trades wasted compute for fewer round
-  trips and only pays off at shallow depth / small branching factor.
-  Designed (`Request::with`'s docs), not built — nothing in this ecosystem
-  has a decision tree deep enough yet to need it.
 - **A shared bench-harness crate** for CADBench/PCBBench/DFMBench's
   near-identical rubric shape — different concern from making one
   decision, so not bundled here, but it exists now:
