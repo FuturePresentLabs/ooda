@@ -1,0 +1,27 @@
+# ooda -- a Rust client and type system for typed, calibrated decision
+# models (Jev/Laya-compatible "System One" APIs).
+#
+# OODA: Observe (state) -> Orient (a bounded Question) -> Decide (one
+# typed-in, typed-out call) -> Act (the caller's own concern, out of scope
+# here). See README.md for the architecture and the survey this was built
+# from.
+[workspace]
+resolver = "2"
+members = ["crates/ooda", "crates/ooda-derive"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/FuturePresentLabs/ooda"
+authors = ["Future Present Labs"]
+
+[workspace.dependencies]
+ooda-derive = { path = "crates/ooda-derive", version = "0.1.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"

@@ -1,0 +1,22 @@
+[package]
+name = "ooda"
+description = "Client and type system for typed, calibrated decision models (Jev/Laya-compatible System One APIs): bounded Choice/Score/Noul questions in, typed confidence-scored answers out. No free text either direction."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+ooda-derive = { workspace = true, optional = true }
+
+[features]
+default = ["derive"]
+derive = ["dep:ooda-derive"]
+
+[dev-dependencies]
+serde = { workspace = true }
