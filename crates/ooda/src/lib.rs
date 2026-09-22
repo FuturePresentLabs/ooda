@@ -57,6 +57,7 @@ mod error;
 mod http;
 mod question;
 mod scripted;
+mod stage;
 mod trace;
 
 pub use best::RunningBest;
@@ -66,6 +67,7 @@ pub use error::Error;
 pub use http::{HttpClient, IntoObservation};
 pub use question::{Answer, Criteria, Question, Usage};
 pub use scripted::ScriptedClient;
+pub use stage::{MAX_STAGES, decide_staged};
 pub use trace::{Kind, Record, Trace};
 
 #[cfg(feature = "derive")]

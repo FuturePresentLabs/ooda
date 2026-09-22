@@ -124,6 +124,20 @@ impl Outcome {
         trace.push(Record::now(name, answer));
         Ok(answer)
     }
+
+    /// Appends every answer in this outcome to `trace`, in question-name
+    /// order — the whole batch, not one cherry-picked name.
+    ///
+    /// For a single named answer, use [`Outcome::recorded_answer`]. This
+    /// exists for callers that just want everything a call produced on the
+    /// record, notably [`crate::decide_staged`], where each stage's full
+    /// answer set belongs in the chain's trace, not just the one field the
+    /// next stage happens to read.
+    pub fn record_all(&self, trace: &mut crate::trace::Trace) {
+        for (name, answer) in &self.answers {
+            trace.push(Record::now(name.clone(), answer));
+        }
+    }
 }
 
 /// Anything that can answer a batch of bounded questions about one

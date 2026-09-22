@@ -69,6 +69,16 @@ pub enum Error {
         expected: &'static str,
     },
 
+    /// A [`crate::decide_staged`] chain's continuation kept asking for
+    /// another stage past [`crate::stage::MAX_STAGES`].
+    ///
+    /// A bug in the continuation (one that never returns `None`) would
+    /// otherwise turn into an unbounded sequence of real, billed decision
+    /// calls — this is the backstop, not a limit anyone should expect to
+    /// hit with a real curated decision tree.
+    #[error("staged decision chain exceeded {0} stages without stopping")]
+    TooManyStages(u32),
+
     /// A `Choice` question was answered with a key outside the offered set.
     ///
     /// The endpoint is supposed to be architecturally incapable of this

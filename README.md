@@ -124,12 +124,23 @@ about the wire format, not a hand-rolled shortcut around it.
   gate that fails on an *empty* trace instead of passing it vacuously.
 - `RunningBest` — a patience-based running-best accumulator for a bounded
   search loop.
+- `decide_staged` — a dependent decision chain: stage 2's `Request` built
+  from stage 1's `Outcome`, every stage's full answer set folded into one
+  `Trace`. The counterpart to `Request::with`'s *independent* batching —
+  use that when every question can be asked in the same call, this when a
+  later question's real content depends on an earlier answer. Capped at
+  `MAX_STAGES` (16) so a continuation that never stops fails loud instead
+  of turning into an unbounded sequence of billed calls.
 
 ## Out of scope for v1
 
-- **Speculative branch pre-fetch** for a dependent question chain — designed
-  (`Request::with`'s docs), not built. Nothing in this ecosystem has a real
-  dependent decision tree yet.
+- **Speculative branch pre-fetch** for a dependent question chain — ask
+  every possible follow-up variant alongside the first question, keep only
+  the one that matches. `decide_staged` covers the plain sequential case
+  (one real call per stage); this trades wasted compute for fewer round
+  trips and only pays off at shallow depth / small branching factor.
+  Designed (`Request::with`'s docs), not built — nothing in this ecosystem
+  has a decision tree deep enough yet to need it.
 - **A shared bench-harness crate** for CADBench/PCBBench/DFMBench's
   near-identical rubric shape. Different concern from making one decision —
   not bundled here.
