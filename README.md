@@ -1,9 +1,11 @@
 # ooda
 
 [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![tests](https://img.shields.io/badge/tests-34%20passing-brightgreen.svg)](#status)
+[![tests](https://img.shields.io/badge/tests-37%20passing-brightgreen.svg)](#status)
 [![built on](https://img.shields.io/badge/built%20on-typesafe.ai%20Jev-6b46c1.svg)](https://typesafe.ai)
 [![status](https://img.shields.io/badge/status-in%20production-success.svg)](#status)
+
+*(Badge numbers are generated — run `scripts/update-badges.sh` after a test count changes; don't hand-edit them.)*
 
 **Observe. Orient. Decide. Act.** That's all it takes to build an RLCD
 harness. This crate is the Observe/Orient/Decide plumbing — strongly typed
@@ -65,7 +67,7 @@ Pinned tests: `crates/ooda/src/question.rs`.
 
 ## Status
 
-- **Compiled, tested, dogfooded.** `cargo test --workspace` — 34 tests
+- **Compiled, tested, dogfooded.** `cargo test --workspace` — 37 tests
   green.
 - **`legion-of-bom` migrated for real.** Its own `DecisionClient` is
   deleted; it calls `ooda` directly now, and its DRC checks pass end to end
