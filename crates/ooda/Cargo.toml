@@ -13,10 +13,12 @@ serde_json.workspace = true
 thiserror.workspace = true
 reqwest.workspace = true
 ooda-derive = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
 
 [features]
 default = ["derive"]
 derive = ["dep:ooda-derive"]
+capture = ["dep:libc"]
 
 [dev-dependencies]
 serde = { workspace = true }

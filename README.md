@@ -162,6 +162,36 @@ about the wire format, not a hand-rolled shortcut around it.
   is a fact about whichever provider actually answered (Jev direct, Laya
   self-hosted and free at the margin, a gateway with its own rate card),
   not something this crate should hardcode and let go stale.
+- `CapturingClient` (the `capture` feature, off by default) — wraps any
+  `Client`, durably appending every `decide()` call to an append-only,
+  rollover-capped JSONL log at `.ooda/<binary-name>/decisions.jsonl` (the
+  binary name is inferred from `std::env::current_exe`, never
+  caller-supplied). Adapted from `speedy`'s own already-production
+  `rlcd.decision.v1` event log — built there independently because this
+  crate had no equivalent yet, exactly the kind of duplication `ooda`
+  exists to end. For fine-tuning on real decision traffic later: request
+  and outcome (or error) in one record, not `speedy`'s split
+  requested/completed/failed phases, since a training example needs a
+  request paired with its real answer. A capture-write failure is a hard
+  error when the underlying decision succeeded — a caller must never be
+  left thinking a decision was durably logged when it wasn't.
+
+### Capturing decisions for fine-tuning
+
+```rust
+use ooda::{Capture, CapturingClient, HttpClient};
+
+let client = CapturingClient::new(
+    HttpClient::from_env()?,
+    Capture::for_current_binary()?,
+);
+// use `client` exactly like `HttpClient` -- every decide() call is now
+// also appended to .ooda/<this binary's name>/decisions.jsonl
+```
+
+Needs the `capture` feature (`ooda = { ..., features = ["capture"] }`) —
+off by default, so a consumer who doesn't want a local write on every
+decision pays nothing for it.
 
 ## Out of scope for v1
 

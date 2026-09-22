@@ -234,8 +234,10 @@ impl Question {
 /// A typed answer to one question.
 ///
 /// Unknown fields are ignored, so a backend that grows the payload does not
-/// break this client.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+/// break this client. Also `Serialize` (round-trips through the same shape
+/// it deserializes) so a caller can write one back out -- the `capture`
+/// feature's durable decision log is the motivating case.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Answer {
     /// One of the option keys the caller offered.
@@ -353,7 +355,7 @@ impl Answer {
 }
 
 /// Token accounting returned alongside the answers.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Usage {
     /// Tokens consumed by the observation and questions.
     ///

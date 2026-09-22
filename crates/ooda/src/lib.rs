@@ -51,6 +51,8 @@
 //! [`choice::ChoiceSpace`] and [`choice::decide_choice`].
 
 mod best;
+#[cfg(feature = "capture")]
+mod capture;
 mod choice;
 mod client;
 mod cost;
@@ -63,6 +65,8 @@ mod stage;
 mod trace;
 
 pub use best::RunningBest;
+#[cfg(feature = "capture")]
+pub use capture::{CapturedDecision, Capture, CapturingClient, MAX_CAPTURE_LOG_BYTES};
 pub use choice::{ChoiceSpace, Decision, decide_choice, decide_choice_traced};
 pub use client::{Client, Observation, Outcome, Request};
 pub use cost::Ledger;

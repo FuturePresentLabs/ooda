@@ -79,6 +79,21 @@ pub enum Error {
     #[error("staged decision chain exceeded {0} stages without stopping")]
     TooManyStages(u32),
 
+    /// The `capture` feature's durable decision log couldn't be written.
+    ///
+    /// Deliberately a hard error, not a silently dropped record: a caller
+    /// capturing decisions for fine-tuning needs to know when a decision
+    /// went un-logged, the same way `speedy`'s own event sink (this
+    /// feature's model) treats a write failure as fatal rather than best-
+    /// effort.
+    #[error("capture log {path}: {source}")]
+    Capture {
+        /// The log file's path.
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+
     /// A `Choice` question was answered with a key outside the offered set.
     ///
     /// The endpoint is supposed to be architecturally incapable of this
