@@ -26,7 +26,7 @@ use crate::error::{self, Error};
 use crate::question::{Answer, Usage};
 
 /// Default base URL: Future Present Labs' bifrost gateway, which routes to
-/// Jev- and Laya-backed models alike. Override with [`OODA_BASE_URL_ENV`].
+/// Jev- and Laya-backed models alike. Override with [`BASE_URL_ENV`].
 pub const DEFAULT_BASE_URL: &str = "https://ai.fpl.dev";
 
 /// The decision route, appended to the base URL.
@@ -34,7 +34,7 @@ pub const DECIDE_PATH: &str = "/v1/systemone";
 
 /// Default model alias. `fpl/decide` is bifrost's own routing alias, not a
 /// universal identifier — a different gateway (or Jev/Laya hit directly)
-/// will want its own model id via [`OODA_MODEL_ENV`] or
+/// will want its own model id via [`MODEL_ENV`] or
 /// [`HttpClient::with_model`].
 pub const DEFAULT_MODEL: &str = "fpl/decide";
 
@@ -132,12 +132,35 @@ impl HttpClient {
         self
     }
 
-    /// The URL this client posts to.
+    /// The URL this client posts to for `decide()`.
     #[must_use]
     pub fn endpoint(&self) -> String {
-        format!("{}{DECIDE_PATH}", self.base_url)
+        self.url(DECIDE_PATH)
     }
 
+    /// `path`, resolved against this client's base URL — the same base
+    /// every route (`decide()`'s System One path, `complete()`'s chat
+    /// completions path) is served from, since both are Bifrost routes on
+    /// one gateway.
+    #[must_use]
+    pub(crate) fn url(&self, path: &str) -> String {
+        format!("{}{path}", self.base_url)
+    }
+
+    /// This client's own configured model -- [`crate::complete`] needs it
+    /// to build a chat-completions request; auth and the base URL are
+    /// already covered by [`HttpClient::post`]/[`HttpClient::url`].
+    pub(crate) fn model(&self) -> &str {
+        &self.model
+    }
+
+    /// POSTs `body` to `url` (a full URL, typically built with
+    /// [`HttpClient::url`]) with this client's bearer auth, retrying
+    /// 429/5xx/transport failures the same way regardless of which Bifrost
+    /// route is being called -- [`Client::decide`] and
+    /// [`crate::complete::Complete::complete`] share this one retry
+    /// implementation rather than each growing their own.
+    ///
     /// Returns the decoded body, the resolved-model header, how long the
     /// *accepted* attempt's own round trip took, and how many retries
     /// preceded it (`0` = worked first try).
@@ -149,14 +172,18 @@ impl HttpClient {
     /// on the day it happened to run rather than the thing it's supposed
     /// to measure. `retries` is reported separately so that information
     /// isn't lost, just not conflated with latency.
-    fn post(&self, body: &Value) -> Result<(Value, Option<String>, Duration, u32), Error> {
+    pub(crate) fn post(
+        &self,
+        url: &str,
+        body: &Value,
+    ) -> Result<(Value, Option<String>, Duration, u32), Error> {
         let mut attempt: u32 = 0;
         loop {
             attempt += 1;
             let call_started = std::time::Instant::now();
             let response = self
                 .http
-                .post(self.endpoint())
+                .post(url)
                 .bearer_auth(&self.api_key)
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
                 .json(body)
@@ -242,7 +269,7 @@ impl Client for HttpClient {
             "state": request.observation,
             "questions": request.questions,
         });
-        let (value, resolved_model, elapsed, retries) = self.post(&body)?;
+        let (value, resolved_model, elapsed, retries) = self.post(&self.endpoint(), &body)?;
         decode_response(&value, resolved_model)
             .map(|outcome| outcome.with_elapsed(elapsed).with_retries(retries))
     }

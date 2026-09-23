@@ -55,6 +55,7 @@ mod best;
 mod capture;
 mod choice;
 mod client;
+mod complete;
 mod cost;
 mod error;
 mod http;
@@ -69,9 +70,13 @@ pub use best::RunningBest;
 pub use capture::{CapturedDecision, Capture, CapturingClient, MAX_CAPTURE_LOG_BYTES};
 pub use choice::{ChoiceSpace, Decision, decide_choice, decide_choice_traced};
 pub use client::{Client, Observation, Outcome, Request};
+pub use complete::{CHAT_PATH, Complete, Prompt, ScriptedComplete};
 pub use cost::Ledger;
 pub use error::Error;
-pub use http::{HttpClient, IntoObservation};
+pub use http::{
+    API_KEY_ENV, BASE_URL_ENV, DECIDE_PATH, DEFAULT_BASE_URL, DEFAULT_MODEL, HttpClient,
+    IntoObservation, MODEL_ENV, RESOLVED_MODEL_HEADER,
+};
 pub use question::{Answer, Criteria, Question, Usage};
 pub use scripted::ScriptedClient;
 pub use speculate::{Resolved, Speculation, decide_speculative};

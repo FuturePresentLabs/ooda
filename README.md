@@ -1,23 +1,32 @@
 # ooda
 
 [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![tests](https://img.shields.io/badge/tests-45%20passing-brightgreen.svg)](#status)
+[![tests](https://img.shields.io/badge/tests-49%20passing-brightgreen.svg)](#status)
 [![built on](https://img.shields.io/badge/built%20on-typesafe.ai%20Jev-6b46c1.svg)](https://typesafe.ai)
 [![status](https://img.shields.io/badge/status-in%20production-success.svg)](#status)
 
 *(Badge numbers are generated — run `scripts/update-badges.sh` after a test count changes; don't hand-edit them.)*
 
-**Observe. Orient. Decide. Act.** That's all it takes to build an RLCD
-harness. This crate is the Observe/Orient/Decide plumbing — strongly typed
-over [typesafe.ai](https://typesafe.ai)'s Jev, and
-[Laya](https://github.com/receptron/laya) (its MIT-licensed FOSS twin).
+**Observe. Orient. Decide. Act.** This crate is the Rust client for
+[Bifrost](https://ai.fpl.dev), Future Present Labs' inference gateway — one
+credential, one retry story, behind two clearly separate capabilities:
 
-Bounded `Choice`/`Score`/`Noul` questions in. Typed, confidence-scored
-answers out. No free text, either direction. Act is always the caller's own
-concern — this crate stops at the decision.
+- **`decide()`** — bounded `Choice`/`Score`/`Noul` questions in, typed,
+  confidence-scored answers out. No free text, either direction, ever.
+  Strongly typed over [typesafe.ai](https://typesafe.ai)'s Jev, and
+  [Laya](https://github.com/receptron/laya) (its MIT-licensed FOSS twin).
+- **`complete()`** — genuinely open free text, for the real cases that
+  actually need it (typing a value into a web form, drafting a planning
+  note) — never used to widen what `decide()` itself accepts, and never
+  used to let a model choose what to ask next inside a hand-written
+  decision chain (see `complete()`'s entry below for why that specific
+  line matters).
 
-Already running in production across EDA/PCB design and CAD/CAM workflows.
-Copy our homework.
+Act is always the caller's own concern — this crate stops at the decision
+(or the completion).
+
+Already running in production across EDA/PCB design, CAD/CAM, and browser
+agent workflows. Copy our homework.
 
 ## 5 lines
 
@@ -67,7 +76,7 @@ Pinned tests: `crates/ooda/src/question.rs`.
 
 ## Status
 
-- **Compiled, tested, dogfooded.** `cargo test --workspace` — 45 tests
+- **Compiled, tested, dogfooded.** `cargo test --workspace` — 49 tests
   green.
 - **`legion-of-bom` migrated for real.** Its own `DecisionClient` is
   deleted; it calls `ooda` directly now, and its DRC checks pass end to end
@@ -85,6 +94,12 @@ Pinned tests: `crates/ooda/src/question.rs`.
   backoff into its reported latency, which is exactly the fairness gap
   `Ledger`/`Outcome::elapsed` exist to close.
 - **`transmog` is integrating** its own decision step onto `ooda` next.
+- **`complete()` lifted from `surf`'s own `OpenAiText`**, the same move
+  `capture` already was for `speedy`'s `RlcdEventSink`: generalize a
+  sibling's already-proven code instead of inventing fresh. Closes a real
+  gap in the original — `surf`'s hand-rolled version had zero retry logic;
+  `complete()` shares `decide()`'s own 429/5xx/transport retry path, since
+  both are Bifrost routes on the same gateway.
 
 ### Scoping a decision to an enum
 
@@ -122,6 +137,29 @@ compiling.)
 `ScriptedClient` answers from a queue of canned response bodies, decoded
 through the exact same path `HttpClient` uses. A test against it is a test
 about the wire format, not a hand-rolled shortcut around it.
+`ScriptedComplete` is the same idea for `complete()`.
+
+### Free text with `complete()`
+
+```rust
+use ooda::{Complete, HttpClient, Prompt};
+
+let client = HttpClient::from_env()?;
+let value = client.complete(
+    &Prompt::new(
+        "Return only the short text to enter into the selected browser field.",
+        "goal: ship the order; field: shipping_city; current value: (empty)",
+    )
+    .with_max_tokens(128)
+    .with_temperature(0.0),
+)?;
+```
+
+Same client type as `decide()` — `HttpClient` implements both `Client` and
+`Complete`. A caller wanting a different model for completions than for
+decisions (a smaller, faster one is usually the right call) constructs a
+second `HttpClient` via `.with_model(..)`; `Prompt` itself carries no model
+override, so there's exactly one place a model is ever configured.
 
 ## What's in this crate
 
@@ -130,6 +168,18 @@ about the wire format, not a hand-rolled shortcut around it.
   batched named questions.
 - `HttpClient` — blocking HTTPS, both retry fixes above.
 - `ScriptedClient` — canned-response mock for tests.
+- `Complete` / `Prompt` / `ScriptedComplete` — `ooda`'s other capability:
+  genuinely open free text (`HttpClient` implements this too, against
+  Bifrost's OpenAI-compatible `/v1/chat/completions` route), for the real
+  cases that need it — typing a value into a web form, drafting a planning
+  note — kept as a clearly separate trait from `Client`, never a second way
+  to answer a `Question`. The line that matters: `complete()` must never
+  become how a caller decides *what bounded question to ask next* inside a
+  `decide_staged`/`decide_speculative` chain — that's an LLM improvising
+  control flow at runtime, exactly what this ecosystem's own
+  deterministic-orchestration principle exists to prevent. Use `complete()`
+  to draft a candidate question for a human (or a validation layer) to
+  review, never to silently reshape a pipeline's next step.
 - `ChoiceSpace` / `#[derive(Choice)]` — scope a `Choice` question to a plain
   Rust enum.
 - `Trace` / `Record` — a run's decision history, foldable into a confidence

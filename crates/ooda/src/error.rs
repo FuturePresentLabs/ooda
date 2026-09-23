@@ -79,6 +79,13 @@ pub enum Error {
     #[error("staged decision chain exceeded {0} stages without stopping")]
     TooManyStages(u32),
 
+    /// A [`crate::complete::Complete::complete`] call decoded fine but came
+    /// back with no non-empty choice -- the same "nothing usable" case
+    /// `surf`'s own text provider treated as a hard error rather than
+    /// silently returning an empty string a caller might type into a form.
+    #[error("completion returned no usable content")]
+    EmptyCompletion,
+
     /// The `capture` feature's durable decision log couldn't be written.
     ///
     /// Deliberately a hard error, not a silently dropped record: a caller
