@@ -26,6 +26,22 @@ pub struct Request {
     pub observation: Observation,
     /// Question name -> question, asked in one call.
     pub questions: BTreeMap<String, Question>,
+    /// The caller's own identifier for this call. **Never transmitted** —
+    /// it is written to the capture log and nowhere else.
+    ///
+    /// This exists so a decision can be chained to what happened *next*. A
+    /// captured record holds a request and the answer to it, which is
+    /// everything knowable at the instant the call returns — but the
+    /// consequence of acting on that answer is not knowable yet, and is
+    /// recorded later, by the caller, somewhere else. Without a shared key
+    /// the two records cannot be rejoined, and a corpus of decisions whose
+    /// outcomes cannot be recovered is a corpus you can clone behaviour
+    /// from but never evaluate or reward.
+    ///
+    /// `run_id` and `sequence` identify a record within *this* log; a
+    /// correlation identifies it in the caller's world, where the
+    /// consequence lives.
+    pub correlation: Option<String>,
 }
 
 impl Request {
@@ -36,7 +52,17 @@ impl Request {
         Request {
             observation: observation.into(),
             questions: BTreeMap::new(),
+            correlation: None,
         }
+    }
+
+    /// Tags this request with the caller's own id for the call, so the
+    /// captured record can be rejoined to whatever the caller records about
+    /// the consequence. See [`Request::correlation`].
+    #[must_use]
+    pub fn correlated(mut self, id: impl Into<String>) -> Self {
+        self.correlation = Some(id.into());
+        self
     }
 
     /// A request carrying exactly one named question.
@@ -97,6 +123,34 @@ pub struct Outcome {
 }
 
 impl Outcome {
+    /// Builds an outcome from answers the caller produced itself, rather
+    /// than from an endpoint.
+    ///
+    /// [`Client`] is implementable from outside this crate, but until now
+    /// its return value was not constructible from outside it, so the trait
+    /// could not actually be implemented. That gap matters for one case in
+    /// particular: a deterministic policy — a scripted baseline, a rules
+    /// engine, a human — answering the *same* typed question a model would.
+    /// Those demonstrations are the most valuable rows in a behaviour-
+    /// cloning corpus, and without this they cannot be captured through the
+    /// same path, so they end up in a second format that has to be
+    /// reconciled by hand forever.
+    ///
+    /// `usage`, `resolved_model`, `elapsed` and `retries` are all `None`:
+    /// there was no endpoint, so there is nothing honest to report. See
+    /// [`Outcome::elapsed`] on why that is left empty rather than zeroed.
+    #[must_use]
+    pub fn answered(answers: impl IntoIterator<Item = (impl Into<String>, Answer)>) -> Self {
+        Outcome::new(
+            answers
+                .into_iter()
+                .map(|(name, answer)| (name.into(), answer))
+                .collect(),
+            None,
+            None,
+        )
+    }
+
     #[must_use]
     pub(crate) fn new(
         answers: BTreeMap<String, Answer>,
