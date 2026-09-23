@@ -57,9 +57,11 @@ pub const MAX_ATTEMPTS: u32 = 5;
 
 /// How long a single attempt may take before it is abandoned.
 ///
-/// Generous by default because most consumers make a decision as a batch
-/// step where a slow answer still beats no answer. A consumer sitting in
-/// front of a person waiting to be spoken to wants far less — see
+/// Sized for a bounded `decide()` as a batch step, where a slow answer
+/// still beats no answer. Two real callers need their own value instead:
+/// a long open-text `complete()` answer, which can run minutes at a
+/// hundred-odd tokens a second, and a caller holding a live interaction
+/// open (a voice turn), which wants far less than 30s. See
 /// [`HttpClient::with_timeout`].
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -74,6 +76,13 @@ fn backoff_secs(attempt: u32) -> u64 {
 /// unset — see [`HttpClient::from_env`]'s docs for why.
 fn non_empty_env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+}
+
+fn http_client(timeout: Duration) -> Result<reqwest::blocking::Client, Error> {
+    reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|e| Error::Transport(e.to_string()))
 }
 
 /// A System One / Jev / Laya-compatible client over blocking HTTPS.
@@ -102,10 +111,7 @@ impl HttpClient {
         if api_key.trim().is_empty() {
             return Err(Error::MissingApiKey(API_KEY_ENV));
         }
-        let http = reqwest::blocking::Client::builder()
-            .timeout(DEFAULT_TIMEOUT)
-            .build()
-            .map_err(|e| Error::Transport(e.to_string()))?;
+        let http = http_client(DEFAULT_TIMEOUT)?;
         Ok(Self {
             base_url: base_url.into().trim_end_matches('/').to_owned(),
             api_key,
@@ -135,33 +141,32 @@ impl HttpClient {
         Self::new(base, key, model)
     }
 
+    /// Returns a client that abandons a single attempt after `timeout`
+    /// instead of [`DEFAULT_TIMEOUT`]. Two real reasons to call this, in
+    /// opposite directions: a long open-text `complete()` answer (a model
+    /// writing a whole document at a hundred-odd tokens a second needs
+    /// minutes), or a caller holding a live interaction open (a voice turn
+    /// that waits 30s for a decision has already failed the person waiting
+    /// on it, and would rather fall back to its own deterministic path
+    /// after a second or two).
+    ///
+    /// Pair with [`Self::with_max_attempts`] for the latter case: the
+    /// timeout bounds one attempt, not the call, and the retry ladder
+    /// multiplies it.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] if the HTTP client cannot be rebuilt.
+    pub fn with_timeout(mut self, timeout: Duration) -> Result<Self, Error> {
+        self.http = http_client(timeout)?;
+        Ok(self)
+    }
+
     /// Returns a client that sends `model` instead of whatever it was built
     /// with.
     #[must_use]
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = model.into();
         self
-    }
-
-    /// Returns a client that abandons a single attempt after `timeout`.
-    ///
-    /// The default suits a batch pipeline, where a slow answer still beats
-    /// no answer. It does not suit a caller holding a live interaction open:
-    /// a voice turn that waits 30s for a decision has already failed the
-    /// person waiting on it, and would rather fall back to its own
-    /// deterministic path after a second or two.
-    ///
-    /// Pair with [`Self::with_max_attempts`]: the timeout bounds one
-    /// attempt, not the call, and the retry ladder multiplies it.
-    ///
-    /// # Errors
-    /// [`Error::Transport`] if the HTTP client cannot be rebuilt.
-    pub fn with_timeout(mut self, timeout: Duration) -> Result<Self, Error> {
-        self.http = reqwest::blocking::Client::builder()
-            .timeout(timeout)
-            .build()
-            .map_err(|e| Error::Transport(e.to_string()))?;
-        Ok(self)
     }
 
     /// Returns a client that gives up after `max_attempts` rather than
@@ -223,6 +228,27 @@ impl HttpClient {
         url: &str,
         body: &Value,
     ) -> Result<(Value, Option<String>, Duration, u32), Error> {
+        let (response, resolved_model, call_started, retries) = self.send(url, body)?;
+        let body_text = response
+            .text()
+            .map_err(|e| Error::Transport(e.to_string()))?;
+        let value: Value = serde_json::from_str(&body_text).map_err(|source| Error::Decode {
+            source,
+            body: error::truncate(&body_text),
+        })?;
+        Ok((value, resolved_model, call_started.elapsed(), retries))
+    }
+
+    /// [`HttpClient::post`]'s retry loop, stopping at the first successful
+    /// response and handing it back unread -- so a streamed body can be
+    /// consumed as it arrives. Returns the response, the resolved-model
+    /// header, when the accepted attempt started, and how many retries
+    /// preceded it.
+    pub(crate) fn send(
+        &self,
+        url: &str,
+        body: &Value,
+    ) -> Result<(reqwest::blocking::Response, Option<String>, std::time::Instant, u32), Error> {
         let mut attempt: u32 = 0;
         loop {
             attempt += 1;
@@ -261,6 +287,9 @@ impl HttpClient {
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<u64>().ok());
 
+            if status.is_success() {
+                return Ok((response, resolved_model, call_started, attempt - 1));
+            }
             let body_text = response
                 .text()
                 .map_err(|e| Error::Transport(e.to_string()))?;
@@ -287,23 +316,15 @@ impl HttpClient {
                 std::thread::sleep(Duration::from_secs(backoff_secs(attempt)));
                 continue;
             }
-            if !status.is_success() {
-                let message = serde_json::from_str::<Value>(&body_text)
-                    .ok()
-                    .and_then(|v| extract_error_message(&v))
-                    .unwrap_or_else(|| error::truncate(&body_text));
-                return Err(Error::Status {
-                    status: status.as_u16(),
-                    message,
-                });
-            }
-
-            let value: Value =
-                serde_json::from_str(&body_text).map_err(|source| Error::Decode {
-                    source,
-                    body: error::truncate(&body_text),
-                })?;
-            return Ok((value, resolved_model, call_started.elapsed(), attempt - 1));
+            // Not a success, not retryable: the endpoint's own words.
+            let message = serde_json::from_str::<Value>(&body_text)
+                .ok()
+                .and_then(|v| extract_error_message(&v))
+                .unwrap_or_else(|| error::truncate(&body_text));
+            return Err(Error::Status {
+                status: status.as_u16(),
+                message,
+            });
         }
     }
 }

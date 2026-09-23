@@ -18,7 +18,7 @@
 //!
 //! [`Client::decide`]: crate::Client::decide
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::error::Error;
 use crate::http::HttpClient;
@@ -37,6 +37,12 @@ pub struct Prompt {
     pub user: String,
     pub max_tokens: u16,
     pub temperature: f32,
+    /// How hard a reasoning model thinks before answering: `"low"`,
+    /// `"medium"` or `"high"`, sent as the gateway's `reasoning.effort`.
+    /// `None` leaves the model's default. Reasoning spends `max_tokens` too:
+    /// a long answer from a model left to think freely can use its whole
+    /// budget on reasoning and come back empty.
+    pub reasoning_effort: Option<String>,
 }
 
 impl Prompt {
@@ -52,7 +58,14 @@ impl Prompt {
             user: user.into(),
             max_tokens: 512,
             temperature: 0.2,
+            reasoning_effort: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = Some(effort.into());
+        self
     }
 
     #[must_use]
@@ -86,28 +99,23 @@ struct ChatRequest<'a> {
     messages: [ChatMessage<'a>; 2],
     max_tokens: u16,
     temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning: Option<Reasoning<'a>>,
+    /// Always streamed: a long answer sent whole arrives only when it is
+    /// finished, and a gateway in front of Bifrost cuts a response that
+    /// says nothing for ~125 s (HTTP 524). Streamed, bytes flow the whole time.
+    stream: bool,
+}
+
+#[derive(Serialize)]
+struct Reasoning<'a> {
+    effort: &'a str,
 }
 
 #[derive(Serialize)]
 struct ChatMessage<'a> {
     role: &'a str,
     content: &'a str,
-}
-
-#[derive(Deserialize)]
-struct ChatResponse {
-    #[serde(default)]
-    choices: Vec<ChatChoice>,
-}
-
-#[derive(Deserialize)]
-struct ChatChoice {
-    message: ChatAnswer,
-}
-
-#[derive(Deserialize)]
-struct ChatAnswer {
-    content: String,
 }
 
 impl Complete for HttpClient {
@@ -126,24 +134,77 @@ impl Complete for HttpClient {
             ],
             max_tokens: prompt.max_tokens,
             temperature: prompt.temperature,
+            reasoning: prompt.reasoning_effort.as_deref().map(|effort| Reasoning { effort }),
+            stream: true,
         })
         .map_err(|source| Error::Decode {
             source,
             body: "<prompt serialization failed>".to_owned(),
         })?;
-        let (value, ..) = self.post(&self.url(CHAT_PATH), &body)?;
-        let response: ChatResponse =
-            serde_json::from_value(value.clone()).map_err(|source| Error::Decode {
-                source,
-                body: crate::error::truncate(&value.to_string()),
-            })?;
-        response
-            .choices
-            .into_iter()
-            .next()
-            .map(|choice| choice.message.content.trim().to_owned())
-            .filter(|content| !content.is_empty())
-            .ok_or(Error::EmptyCompletion)
+        let (response, ..) = self.send(&self.url(CHAT_PATH), &body)?;
+        collect_stream(std::io::BufReader::new(response))
+    }
+}
+
+/// The answer text of a chat-completions event stream: every `data:` event's
+/// `choices[0].delta.content`, in order, until `data: [DONE]` or the end.
+/// Comments (keep-alives) and events without content (a role, reasoning,
+/// usage) are skipped; an `error` event fails the call.
+///
+/// # Errors
+/// [`Error::Transport`] if the stream breaks, [`Error::Status`] for an error
+/// event, [`Error::Decode`] for an event that is not JSON,
+/// [`Error::EmptyCompletion`] if no content arrived.
+pub(crate) fn collect_stream(reader: impl std::io::BufRead) -> Result<String, Error> {
+    let mut answer = String::new();
+    let mut reasoning_events = 0;
+    for line in reader.lines() {
+        let line = line.map_err(|e| Error::Transport(e.to_string()))?;
+        let Some(data) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let data = data.trim();
+        if data == "[DONE]" {
+            break;
+        }
+        if data.is_empty() {
+            continue;
+        }
+        let event: serde_json::Value = serde_json::from_str(data).map_err(|source| Error::Decode {
+            source,
+            body: crate::error::truncate(data),
+        })?;
+        if let Some(error) = event.get("error") {
+            return Err(Error::Status {
+                status: error.get("code").and_then(serde_json::Value::as_u64).unwrap_or(500) as u16,
+                message: error
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("error event in the stream")
+                    .to_owned(),
+            });
+        }
+        if let Some(piece) = event
+            .pointer("/choices/0/delta/content")
+            .and_then(serde_json::Value::as_str)
+        {
+            answer.push_str(piece);
+        }
+        if event
+            .pointer("/choices/0/delta/reasoning")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|r| !r.is_empty())
+        {
+            reasoning_events += 1;
+        }
+    }
+    let answer = answer.trim().to_owned();
+    if answer.is_empty() && reasoning_events > 0 {
+        Err(Error::ReasoningOnly { reasoning_events })
+    } else if answer.is_empty() {
+        Err(Error::EmptyCompletion)
+    } else {
+        Ok(answer)
     }
 }
 
@@ -180,6 +241,38 @@ impl Complete for ScriptedComplete {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stream_is_its_content_deltas_in_order() {
+        let stream = ": keep-alive\n\
+data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\
+\n\
+data: {\"choices\":[{\"delta\":{\"reasoning\":\"thinking...\"}}]}\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"a\\\": \"}}]}\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"1}\"}}]}\n\
+data: {\"usage\":{\"total_tokens\":3},\"choices\":[]}\n\
+data: [DONE]\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"after done\"}}]}\n";
+        assert_eq!(collect_stream(stream.as_bytes()).unwrap(), "{\"a\": 1}");
+    }
+
+    #[test]
+    fn an_error_event_or_an_empty_stream_fails() {
+        let error = "data: {\"error\":{\"code\":429,\"message\":\"slow down\"}}\n";
+        assert!(matches!(
+            collect_stream(error.as_bytes()),
+            Err(Error::Status { status: 429, .. })
+        ));
+        assert!(matches!(
+            collect_stream("data: [DONE]\n".as_bytes()),
+            Err(Error::EmptyCompletion)
+        ));
+        let thinking = "data: {\"choices\":[{\"delta\":{\"reasoning\":\"hmm\"}}]}\ndata: [DONE]\n";
+        assert!(matches!(
+            collect_stream(thinking.as_bytes()),
+            Err(Error::ReasoningOnly { reasoning_events: 1 })
+        ));
+    }
 
     #[test]
     fn a_prompt_defaults_to_a_low_but_not_zero_temperature() {
