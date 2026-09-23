@@ -197,6 +197,27 @@ impl HttpClient {
         url: &str,
         body: &Value,
     ) -> Result<(Value, Option<String>, Duration, u32), Error> {
+        let (response, resolved_model, call_started, retries) = self.send(url, body)?;
+        let body_text = response
+            .text()
+            .map_err(|e| Error::Transport(e.to_string()))?;
+        let value: Value = serde_json::from_str(&body_text).map_err(|source| Error::Decode {
+            source,
+            body: error::truncate(&body_text),
+        })?;
+        Ok((value, resolved_model, call_started.elapsed(), retries))
+    }
+
+    /// [`HttpClient::post`]'s retry loop, stopping at the first successful
+    /// response and handing it back unread -- so a streamed body can be
+    /// consumed as it arrives. Returns the response, the resolved-model
+    /// header, when the accepted attempt started, and how many retries
+    /// preceded it.
+    pub(crate) fn send(
+        &self,
+        url: &str,
+        body: &Value,
+    ) -> Result<(reqwest::blocking::Response, Option<String>, std::time::Instant, u32), Error> {
         let mut attempt: u32 = 0;
         loop {
             attempt += 1;
@@ -235,6 +256,9 @@ impl HttpClient {
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<u64>().ok());
 
+            if status.is_success() {
+                return Ok((response, resolved_model, call_started, attempt - 1));
+            }
             let body_text = response
                 .text()
                 .map_err(|e| Error::Transport(e.to_string()))?;
@@ -261,23 +285,15 @@ impl HttpClient {
                 std::thread::sleep(Duration::from_secs(backoff_secs(attempt)));
                 continue;
             }
-            if !status.is_success() {
-                let message = serde_json::from_str::<Value>(&body_text)
-                    .ok()
-                    .and_then(|v| extract_error_message(&v))
-                    .unwrap_or_else(|| error::truncate(&body_text));
-                return Err(Error::Status {
-                    status: status.as_u16(),
-                    message,
-                });
-            }
-
-            let value: Value =
-                serde_json::from_str(&body_text).map_err(|source| Error::Decode {
-                    source,
-                    body: error::truncate(&body_text),
-                })?;
-            return Ok((value, resolved_model, call_started.elapsed(), attempt - 1));
+            // Not a success, not retryable: the endpoint's own words.
+            let message = serde_json::from_str::<Value>(&body_text)
+                .ok()
+                .and_then(|v| extract_error_message(&v))
+                .unwrap_or_else(|| error::truncate(&body_text));
+            return Err(Error::Status {
+                status: status.as_u16(),
+                message,
+            });
         }
     }
 }
