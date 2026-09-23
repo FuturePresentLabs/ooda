@@ -1,7 +1,7 @@
 # ooda
 
 [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![tests](https://img.shields.io/badge/tests-53%20passing-brightgreen.svg)](#status)
+[![tests](https://img.shields.io/badge/tests-55%20passing-brightgreen.svg)](#status)
 [![built on](https://img.shields.io/badge/built%20on-typesafe.ai%20Jev-6b46c1.svg)](https://typesafe.ai)
 [![status](https://img.shields.io/badge/status-in%20production-success.svg)](#status)
 
@@ -76,8 +76,8 @@ Pinned tests: `crates/ooda/src/question.rs`.
 
 ## Status
 
-- **Compiled, tested, dogfooded.** `cargo test --workspace` — 49 tests
-  green.
+- **Compiled, tested, dogfooded.** `cargo test --workspace` — 55 tests
+  green (66 with `--features capture`).
 - **`legion-of-bom` migrated for real.** Its own `DecisionClient` is
   deleted; it calls `ooda` directly now, and its DRC checks pass end to end
   through the new path.
@@ -99,7 +99,23 @@ Pinned tests: `crates/ooda/src/question.rs`.
   sibling's already-proven code instead of inventing fresh. Closes a real
   gap in the original — `surf`'s hand-rolled version had zero retry logic;
   `complete()` shares `decide()`'s own 429/5xx/transport retry path, since
-  both are Bifrost routes on the same gateway.
+  both are Bifrost routes on the same gateway. It also streams now: a
+  document-length answer at a hundred-odd tokens/s took over 125s sent
+  whole, long enough for a gateway in front of Bifrost to cut it with HTTP
+  524. `complete()` asks for a stream and collects it as it arrives instead.
+- **`jarvis` is the first consumer pulling the other direction.** A voice
+  turn budgets ~2s for a decision and would rather fail fast than wait out
+  even one retry — `with_timeout`/`with_max_attempts` exist because the
+  alternative was `jarvis` keeping its own hand-rolled client, exactly the
+  duplication this crate exists to end.
+- **Captured decisions are rejoinable to their consequences.** A record
+  originally held just a request and its answer — enough for behavior
+  cloning, nothing else. `Request::correlated(id)`, `run_id`, `labels`, and
+  a now-public `Outcome::answered(..)` (so a deterministic policy's
+  demonstrations can be captured through the same path a model's decisions
+  are) close the gap: a caller can now rejoin a captured decision to
+  whatever it separately records about acting on it, which is what makes a
+  corpus evaluable and rewardable, not just clonable.
 
 ### Scoping a decision to an enum
 
@@ -161,12 +177,50 @@ decisions (a smaller, faster one is usually the right call) constructs a
 second `HttpClient` via `.with_model(..)`; `Prompt` itself carries no model
 override, so there's exactly one place a model is ever configured.
 
+Always streamed under the hood (`choices[0].delta.content`, collected as it
+arrives) — a long answer sent whole risks a front-Bifrost gateway cutting an
+idle connection with HTTP 524 before the first byte comes back. For a
+reasoning model, `Prompt::with_reasoning_effort("low"|"medium"|"high")` sets
+the gateway's `reasoning.effort`; left unset, the model's own default
+applies. Reasoning spends `max_tokens` too — a model left to think freely
+can burn its whole budget reasoning and answer with nothing, which
+`complete()` reports as `Error::ReasoningOnly` (lower the effort or raise
+the budget) rather than silently returning an empty string.
+
+### Tuning timeout and retries
+
+```rust
+use std::time::Duration;
+use ooda::HttpClient;
+
+// A voice turn: fail fast, no retry ladder -- a retry is indistinguishable
+// from a hang to someone waiting on an answer.
+let client = HttpClient::from_env()?
+    .with_timeout(Duration::from_secs(2))?
+    .with_max_attempts(1);
+
+// A long complete() answer: the default 30s suits a bounded decide(), not
+// a model writing a whole document at a hundred-odd tokens/s.
+let patient = HttpClient::from_env()?.with_timeout(Duration::from_secs(180))?;
+```
+
+`DEFAULT_TIMEOUT` (30s) and `MAX_ATTEMPTS` (5) are sized for a `decide()`
+call inside a batch pipeline, where a slow answer still beats no answer —
+both are public so a caller can read what it's overriding instead of
+guessing. `with_max_attempts(1)` disables retrying outright; a budget below
+`1` is raised to `1` rather than honored, since a client that never actually
+tried would otherwise report a failure it didn't earn.
+
 ## What's in this crate
 
 - `Question` / `Answer` — the bounded wire types.
 - `Client` / `Request` / `Outcome` — one `decide()` seam for any number of
   batched named questions.
 - `HttpClient` — blocking HTTPS, both retry fixes above.
+  `with_timeout`/`with_max_attempts` override `DEFAULT_TIMEOUT`/
+  `MAX_ATTEMPTS` per client, in either direction — a latency-bound voice
+  turn wanting less of both, a long `complete()` answer wanting more time
+  (see [Tuning timeout and retries](#tuning-timeout-and-retries)).
 - `ScriptedClient` — canned-response mock for tests.
 - `Complete` / `Prompt` / `ScriptedComplete` — `ooda`'s other capability:
   genuinely open free text (`HttpClient` implements this too, against
@@ -179,7 +233,12 @@ override, so there's exactly one place a model is ever configured.
   control flow at runtime, exactly what this ecosystem's own
   deterministic-orchestration principle exists to prevent. Use `complete()`
   to draft a candidate question for a human (or a validation layer) to
-  review, never to silently reshape a pipeline's next step.
+  review, never to silently reshape a pipeline's next step. Always
+  streamed internally, so a long answer is never idle long enough for a
+  gateway to cut it; `Prompt::with_reasoning_effort` tunes a reasoning
+  model's `reasoning.effort`, and a stream that reasons but never answers
+  fails loud as `Error::ReasoningOnly` rather than returning an empty
+  string.
 - `ChoiceSpace` / `#[derive(Choice)]` — scope a `Choice` question to a plain
   Rust enum.
 - `Trace` / `Record` — a run's decision history, foldable into a confidence
@@ -224,17 +283,32 @@ override, so there's exactly one place a model is ever configured.
   requested/completed/failed phases, since a training example needs a
   request paired with its real answer. A capture-write failure is a hard
   error when the underlying decision succeeded — a caller must never be
-  left thinking a decision was durably logged when it wasn't.
+  left thinking a decision was durably logged when it wasn't. Every record
+  carries a `run_id` (so restarting a supervised agent doesn't collide
+  sequences from a previous life in a log it shares) and optional
+  `labels` (untyped, caller-supplied context this crate has no business
+  knowing the shape of — which game, which board revision, which tenant).
+  `Request::correlated(id)` tags a request with the caller's own id for
+  the call, written to the capture log and **never transmitted**, so a
+  captured decision can be rejoined to whatever the caller separately
+  records about the consequence of acting on it — the seam a corpus needs
+  to be evaluable and rewardable, not just clonable.
+  `Outcome::answered(..)` is public for the same reason from the other
+  side: a deterministic policy (a scripted baseline, a rules engine, a
+  human) answering the same typed question a model would can now be
+  captured through the identical path, instead of a second format that
+  has to be reconciled by hand.
 
 ### Capturing decisions for fine-tuning
 
 ```rust
-use ooda::{Capture, CapturingClient, HttpClient};
+use ooda::{Capture, CapturingClient, HttpClient, Request};
 
 let client = CapturingClient::new(
     HttpClient::from_env()?,
-    Capture::for_current_binary()?,
+    Capture::for_current_binary()?.labelled([("game", "smk")]),
 );
+let request = Request::single(observation, "action", question).correlated("turn-482");
 // use `client` exactly like `HttpClient` -- every decide() call is now
 // also appended to .ooda/<this binary's name>/decisions.jsonl
 ```
