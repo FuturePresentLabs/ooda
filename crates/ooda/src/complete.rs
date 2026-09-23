@@ -37,6 +37,12 @@ pub struct Prompt {
     pub user: String,
     pub max_tokens: u16,
     pub temperature: f32,
+    /// How hard a reasoning model thinks before answering: `"low"`,
+    /// `"medium"` or `"high"`, sent as the gateway's `reasoning.effort`.
+    /// `None` leaves the model's default. Reasoning spends `max_tokens` too:
+    /// a long answer from a model left to think freely can use its whole
+    /// budget on reasoning and come back empty.
+    pub reasoning_effort: Option<String>,
 }
 
 impl Prompt {
@@ -52,7 +58,14 @@ impl Prompt {
             user: user.into(),
             max_tokens: 512,
             temperature: 0.2,
+            reasoning_effort: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = Some(effort.into());
+        self
     }
 
     #[must_use]
@@ -86,10 +99,17 @@ struct ChatRequest<'a> {
     messages: [ChatMessage<'a>; 2],
     max_tokens: u16,
     temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning: Option<Reasoning<'a>>,
     /// Always streamed: a long answer sent whole arrives only when it is
     /// finished, and a gateway in front of Bifrost cuts a response that
     /// says nothing for ~125 s (HTTP 524). Streamed, bytes flow the whole time.
     stream: bool,
+}
+
+#[derive(Serialize)]
+struct Reasoning<'a> {
+    effort: &'a str,
 }
 
 #[derive(Serialize)]
@@ -114,6 +134,7 @@ impl Complete for HttpClient {
             ],
             max_tokens: prompt.max_tokens,
             temperature: prompt.temperature,
+            reasoning: prompt.reasoning_effort.as_deref().map(|effort| Reasoning { effort }),
             stream: true,
         })
         .map_err(|source| Error::Decode {
