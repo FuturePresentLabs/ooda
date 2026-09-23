@@ -57,6 +57,11 @@ const MAX_ATTEMPTS: u32 = 5;
 /// Backoff when the endpoint doesn't say how long to wait (no
 /// `Retry-After`): doubles each attempt, starting at 2s (2, 4, 8, 16s for
 /// attempts 1-4).
+/// How long one request may take before it is abandoned: sized for a
+/// bounded `decide()`. A long open-text completion needs more -- see
+/// [`HttpClient::with_timeout`].
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+
 fn backoff_secs(attempt: u32) -> u64 {
     2u64.saturating_pow(attempt)
 }
@@ -65,6 +70,13 @@ fn backoff_secs(attempt: u32) -> u64 {
 /// unset — see [`HttpClient::from_env`]'s docs for why.
 fn non_empty_env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+}
+
+fn http_client(timeout: Duration) -> Result<reqwest::blocking::Client, Error> {
+    reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|e| Error::Transport(e.to_string()))
 }
 
 /// A System One / Jev / Laya-compatible client over blocking HTTPS.
@@ -92,10 +104,7 @@ impl HttpClient {
         if api_key.trim().is_empty() {
             return Err(Error::MissingApiKey(API_KEY_ENV));
         }
-        let http = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|e| Error::Transport(e.to_string()))?;
+        let http = http_client(DEFAULT_TIMEOUT)?;
         Ok(Self {
             base_url: base_url.into().trim_end_matches('/').to_owned(),
             api_key,
@@ -122,6 +131,17 @@ impl HttpClient {
         let base = non_empty_env(BASE_URL_ENV).unwrap_or_else(|| DEFAULT_BASE_URL.to_owned());
         let model = non_empty_env(MODEL_ENV).unwrap_or_else(|| DEFAULT_MODEL.to_owned());
         Self::new(base, key, model)
+    }
+
+    /// Returns a client whose requests may each take up to `timeout`, for
+    /// a call whose answer is long: a model writing a whole document at a
+    /// hundred-odd tokens a second needs minutes, not [`DEFAULT_TIMEOUT`].
+    ///
+    /// # Errors
+    /// [`Error::Transport`] if the HTTP client cannot be rebuilt.
+    pub fn with_timeout(mut self, timeout: Duration) -> Result<Self, Error> {
+        self.http = http_client(timeout)?;
+        Ok(self)
     }
 
     /// Returns a client that sends `model` instead of whatever it was built

@@ -76,6 +76,7 @@ pub use error::Error;
 pub use http::{
     API_KEY_ENV, BASE_URL_ENV, DECIDE_PATH, DEFAULT_BASE_URL, DEFAULT_MODEL, HttpClient,
     IntoObservation, MODEL_ENV, RESOLVED_MODEL_HEADER,
+    DEFAULT_TIMEOUT,
 };
 pub use question::{Answer, Criteria, Question, Usage};
 pub use scripted::ScriptedClient;
