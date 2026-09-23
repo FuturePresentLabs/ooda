@@ -157,6 +157,7 @@ impl Complete for HttpClient {
 /// [`Error::EmptyCompletion`] if no content arrived.
 pub(crate) fn collect_stream(reader: impl std::io::BufRead) -> Result<String, Error> {
     let mut answer = String::new();
+    let mut reasoning_events = 0;
     for line in reader.lines() {
         let line = line.map_err(|e| Error::Transport(e.to_string()))?;
         let Some(data) = line.strip_prefix("data:") else {
@@ -189,9 +190,18 @@ pub(crate) fn collect_stream(reader: impl std::io::BufRead) -> Result<String, Er
         {
             answer.push_str(piece);
         }
+        if event
+            .pointer("/choices/0/delta/reasoning")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|r| !r.is_empty())
+        {
+            reasoning_events += 1;
+        }
     }
     let answer = answer.trim().to_owned();
-    if answer.is_empty() {
+    if answer.is_empty() && reasoning_events > 0 {
+        Err(Error::ReasoningOnly { reasoning_events })
+    } else if answer.is_empty() {
         Err(Error::EmptyCompletion)
     } else {
         Ok(answer)
@@ -256,6 +266,11 @@ data: {\"choices\":[{\"delta\":{\"content\":\"after done\"}}]}\n";
         assert!(matches!(
             collect_stream("data: [DONE]\n".as_bytes()),
             Err(Error::EmptyCompletion)
+        ));
+        let thinking = "data: {\"choices\":[{\"delta\":{\"reasoning\":\"hmm\"}}]}\ndata: [DONE]\n";
+        assert!(matches!(
+            collect_stream(thinking.as_bytes()),
+            Err(Error::ReasoningOnly { reasoning_events: 1 })
         ));
     }
 

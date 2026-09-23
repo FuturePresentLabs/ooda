@@ -86,6 +86,15 @@ pub enum Error {
     #[error("completion returned no usable content")]
     EmptyCompletion,
 
+    /// A streamed completion that reasoned and never answered: every token
+    /// went to reasoning, usually because `max_tokens` ran out first. Lower
+    /// the prompt's reasoning effort or raise its budget.
+    #[error("the model reasoned ({reasoning_events} reasoning events) and wrote no answer before the stream ended: lower the reasoning effort or raise max_tokens")]
+    ReasoningOnly {
+        /// How many reasoning events arrived.
+        reasoning_events: usize,
+    },
+
     /// The `capture` feature's durable decision log couldn't be written.
     ///
     /// Deliberately a hard error, not a silently dropped record: a caller
