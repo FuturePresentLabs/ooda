@@ -1,7 +1,7 @@
 # ooda
 
 [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![tests](https://img.shields.io/badge/tests-49%20passing-brightgreen.svg)](#status)
+[![tests](https://img.shields.io/badge/tests-53%20passing-brightgreen.svg)](#status)
 [![built on](https://img.shields.io/badge/built%20on-typesafe.ai%20Jev-6b46c1.svg)](https://typesafe.ai)
 [![status](https://img.shields.io/badge/status-in%20production-success.svg)](#status)
 

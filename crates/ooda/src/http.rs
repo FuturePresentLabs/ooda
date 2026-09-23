@@ -51,8 +51,17 @@ pub const BASE_URL_ENV: &str = "OODA_BASE_URL";
 pub const MODEL_ENV: &str = "OODA_MODEL";
 
 /// Attempts beyond this many give up rather than retry forever — covers a
-/// genuinely down endpoint or a rate limit that isn't recovering.
-const MAX_ATTEMPTS: u32 = 5;
+/// genuinely down endpoint or a rate limit that isn't recovering. The
+/// default for [`HttpClient::with_max_attempts`].
+pub const MAX_ATTEMPTS: u32 = 5;
+
+/// How long a single attempt may take before it is abandoned.
+///
+/// Generous by default because most consumers make a decision as a batch
+/// step where a slow answer still beats no answer. A consumer sitting in
+/// front of a person waiting to be spoken to wants far less — see
+/// [`HttpClient::with_timeout`].
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Backoff when the endpoint doesn't say how long to wait (no
 /// `Retry-After`): doubles each attempt, starting at 2s (2, 4, 8, 16s for
@@ -73,6 +82,7 @@ pub struct HttpClient {
     base_url: String,
     api_key: String,
     model: String,
+    max_attempts: u32,
     http: reqwest::blocking::Client,
 }
 
@@ -93,13 +103,14 @@ impl HttpClient {
             return Err(Error::MissingApiKey(API_KEY_ENV));
         }
         let http = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(30))
+            .timeout(DEFAULT_TIMEOUT)
             .build()
             .map_err(|e| Error::Transport(e.to_string()))?;
         Ok(Self {
             base_url: base_url.into().trim_end_matches('/').to_owned(),
             api_key,
             model: model.into(),
+            max_attempts: MAX_ATTEMPTS,
             http,
         })
     }
@@ -129,6 +140,41 @@ impl HttpClient {
     #[must_use]
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = model.into();
+        self
+    }
+
+    /// Returns a client that abandons a single attempt after `timeout`.
+    ///
+    /// The default suits a batch pipeline, where a slow answer still beats
+    /// no answer. It does not suit a caller holding a live interaction open:
+    /// a voice turn that waits 30s for a decision has already failed the
+    /// person waiting on it, and would rather fall back to its own
+    /// deterministic path after a second or two.
+    ///
+    /// Pair with [`Self::with_max_attempts`]: the timeout bounds one
+    /// attempt, not the call, and the retry ladder multiplies it.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] if the HTTP client cannot be rebuilt.
+    pub fn with_timeout(mut self, timeout: Duration) -> Result<Self, Error> {
+        self.http = reqwest::blocking::Client::builder()
+            .timeout(timeout)
+            .build()
+            .map_err(|e| Error::Transport(e.to_string()))?;
+        Ok(self)
+    }
+
+    /// Returns a client that gives up after `max_attempts` rather than
+    /// [`MAX_ATTEMPTS`].
+    ///
+    /// `1` disables retrying entirely, which is what a latency-bound caller
+    /// usually wants: the backoff ladder is seconds long by design, so for
+    /// them a retry is indistinguishable from a hang. Values below `1` are
+    /// raised to `1` — a client that makes no attempt at all would report a
+    /// failure it never actually tried.
+    #[must_use]
+    pub fn with_max_attempts(mut self, max_attempts: u32) -> Self {
+        self.max_attempts = max_attempts.max(1);
         self
     }
 
@@ -192,7 +238,7 @@ impl HttpClient {
             let response = match response {
                 Ok(r) => r,
                 Err(e) => {
-                    if attempt >= MAX_ATTEMPTS {
+                    if attempt >= self.max_attempts {
                         return Err(Error::Exhausted {
                             attempts: attempt,
                             message: e.to_string(),
@@ -220,7 +266,7 @@ impl HttpClient {
                 .map_err(|e| Error::Transport(e.to_string()))?;
 
             if status.as_u16() == 429 {
-                if attempt >= MAX_ATTEMPTS {
+                if attempt >= self.max_attempts {
                     return Err(Error::Exhausted {
                         attempts: attempt,
                         message: format!("rate limited (429): {}", error::truncate(&body_text)),
@@ -232,7 +278,7 @@ impl HttpClient {
                 continue;
             }
             if status.is_server_error() {
-                if attempt >= MAX_ATTEMPTS {
+                if attempt >= self.max_attempts {
                     return Err(Error::Exhausted {
                         attempts: attempt,
                         message: format!("HTTP {status}: {}", error::truncate(&body_text)),
@@ -529,5 +575,46 @@ mod tests {
         .unwrap();
         let answers = raw.into_answers().unwrap();
         assert_eq!(answers["q"].choice(), Some("a"));
+    }
+
+    #[test]
+    fn a_client_defaults_to_the_full_retry_ladder() {
+        let client = HttpClient::new("https://example.invalid", "k", "m").unwrap();
+        assert_eq!(client.max_attempts, MAX_ATTEMPTS);
+    }
+
+    #[test]
+    fn one_attempt_means_no_retry_at_all() {
+        // What a latency-bound caller wants. The backoff ladder is seconds
+        // long by design, so to a voice turn a retry is indistinguishable
+        // from a hang -- it would rather fail fast and use its own
+        // deterministic fallback.
+        let client = HttpClient::new("https://example.invalid", "k", "m")
+            .unwrap()
+            .with_max_attempts(1);
+        assert_eq!(client.max_attempts, 1);
+    }
+
+    #[test]
+    fn an_attempt_budget_below_one_is_raised_rather_than_honored() {
+        // Zero attempts would report a failure the client never actually
+        // tried, which is a lie about the endpoint.
+        let client = HttpClient::new("https://example.invalid", "k", "m")
+            .unwrap()
+            .with_max_attempts(0);
+        assert_eq!(client.max_attempts, 1);
+    }
+
+    #[test]
+    fn a_timeout_can_be_tightened_for_an_interactive_caller() {
+        let client = HttpClient::new("https://example.invalid", "k", "m")
+            .unwrap()
+            .with_timeout(Duration::from_millis(1500))
+            .unwrap()
+            .with_max_attempts(1);
+        // The builders compose and keep the rest of the configuration.
+        assert_eq!(client.max_attempts, 1);
+        assert_eq!(client.model, "m");
+        assert_eq!(client.base_url, "https://example.invalid");
     }
 }

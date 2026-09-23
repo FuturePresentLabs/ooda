@@ -74,8 +74,8 @@ pub use complete::{CHAT_PATH, Complete, Prompt, ScriptedComplete};
 pub use cost::Ledger;
 pub use error::Error;
 pub use http::{
-    API_KEY_ENV, BASE_URL_ENV, DECIDE_PATH, DEFAULT_BASE_URL, DEFAULT_MODEL, HttpClient,
-    IntoObservation, MODEL_ENV, RESOLVED_MODEL_HEADER,
+    API_KEY_ENV, BASE_URL_ENV, DECIDE_PATH, DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_TIMEOUT,
+    HttpClient, IntoObservation, MAX_ATTEMPTS, MODEL_ENV, RESOLVED_MODEL_HEADER,
 };
 pub use question::{Answer, Criteria, Question, Usage};
 pub use scripted::ScriptedClient;
