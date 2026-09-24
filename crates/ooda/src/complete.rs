@@ -147,17 +147,20 @@ impl Complete for HttpClient {
 }
 
 /// The answer text of a chat-completions event stream: every `data:` event's
-/// `choices[0].delta.content`, in order, until `data: [DONE]` or the end.
-/// Comments (keep-alives) and events without content (a role, reasoning,
-/// usage) are skipped; an `error` event fails the call.
+/// `choices[0].delta.content`, in order, until `data: [DONE]`. Comments
+/// (keep-alives) and events without content (a role, reasoning, usage) are
+/// skipped; an `error` event fails the call.
 ///
 /// # Errors
 /// [`Error::Transport`] if the stream breaks, [`Error::Status`] for an error
 /// event, [`Error::Decode`] for an event that is not JSON,
-/// [`Error::EmptyCompletion`] if no content arrived.
+/// [`Error::Truncated`] if it ends without `[DONE]` or stops at the token
+/// budget, [`Error::EmptyCompletion`] if no content arrived.
 pub(crate) fn collect_stream(reader: impl std::io::BufRead) -> Result<String, Error> {
     let mut answer = String::new();
     let mut reasoning_events = 0;
+    let mut done = false;
+    let mut out_of_tokens = false;
     for line in reader.lines() {
         let line = line.map_err(|e| Error::Transport(e.to_string()))?;
         let Some(data) = line.strip_prefix("data:") else {
@@ -165,6 +168,7 @@ pub(crate) fn collect_stream(reader: impl std::io::BufRead) -> Result<String, Er
         };
         let data = data.trim();
         if data == "[DONE]" {
+            done = true;
             break;
         }
         if data.is_empty() {
@@ -190,6 +194,9 @@ pub(crate) fn collect_stream(reader: impl std::io::BufRead) -> Result<String, Er
         {
             answer.push_str(piece);
         }
+        if event.pointer("/choices/0/finish_reason").and_then(serde_json::Value::as_str) == Some("length") {
+            out_of_tokens = true;
+        }
         if event
             .pointer("/choices/0/delta/reasoning")
             .and_then(serde_json::Value::as_str)
@@ -199,6 +206,18 @@ pub(crate) fn collect_stream(reader: impl std::io::BufRead) -> Result<String, Er
         }
     }
     let answer = answer.trim().to_owned();
+    if out_of_tokens || !done {
+        return Err(Error::Truncated {
+            why: if out_of_tokens {
+                "the model reached max_tokens: raise it or lower the reasoning effort"
+            } else {
+                "the stream ended before [DONE]: a timeout or a dropped connection"
+            },
+            chars: answer.len(),
+            reasoning_events,
+            partial: answer,
+        });
+    }
     if answer.is_empty() && reasoning_events > 0 {
         Err(Error::ReasoningOnly { reasoning_events })
     } else if answer.is_empty() {
@@ -271,6 +290,30 @@ data: {\"choices\":[{\"delta\":{\"content\":\"after done\"}}]}\n";
         assert!(matches!(
             collect_stream(thinking.as_bytes()),
             Err(Error::ReasoningOnly { reasoning_events: 1 })
+        ));
+    }
+
+    /// A cut-off answer is an error, never passed off as the whole answer.
+    #[test]
+    fn a_truncated_stream_fails_loud() {
+        let dropped = "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"a\\\": [1,\"}}]}\n";
+        match collect_stream(dropped.as_bytes()) {
+            Err(Error::Truncated { chars, partial, why, .. }) => {
+                assert_eq!(chars, 9);
+                assert_eq!(partial, "{\"a\": [1,");
+                assert!(why.contains("[DONE]"));
+            }
+            other => panic!("{other:?}"),
+        }
+        let budget = "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"a\\\"\"},\"finish_reason\":\"length\"}]}\ndata: [DONE]\n";
+        assert!(matches!(
+            collect_stream(budget.as_bytes()),
+            Err(Error::Truncated { why, .. }) if why.contains("max_tokens")
+        ));
+        let thinking = "data: {\"choices\":[{\"delta\":{\"reasoning\":\"hmm\"}}]}\n";
+        assert!(matches!(
+            collect_stream(thinking.as_bytes()),
+            Err(Error::Truncated { chars: 0, reasoning_events: 1, .. })
         ));
     }
 

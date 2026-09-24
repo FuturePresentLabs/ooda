@@ -95,6 +95,22 @@ pub enum Error {
         reasoning_events: usize,
     },
 
+    /// The answer was cut off: the stream ended without `[DONE]` (a timeout
+    /// or a dropped connection), or the model stopped at its token budget.
+    /// What arrived is kept for the caller to show, never passed off as the
+    /// whole answer.
+    #[error("the answer was cut off after {chars} characters ({reasoning_events} reasoning events): {why}")]
+    Truncated {
+        /// Why: the stream ended early, or the model ran out of tokens.
+        why: &'static str,
+        /// How much answer text arrived.
+        chars: usize,
+        /// How many reasoning events arrived.
+        reasoning_events: usize,
+        /// The text that did arrive.
+        partial: String,
+    },
+
     /// The `capture` feature's durable decision log couldn't be written.
     ///
     /// Deliberately a hard error, not a silently dropped record: a caller
