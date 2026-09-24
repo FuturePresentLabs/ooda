@@ -57,6 +57,7 @@ mod choice;
 mod client;
 mod complete;
 mod cost;
+mod embed;
 mod error;
 mod http;
 mod question;
@@ -72,6 +73,7 @@ pub use choice::{ChoiceSpace, Decision, decide_choice, decide_choice_traced};
 pub use client::{Client, Observation, Outcome, Request};
 pub use complete::{CHAT_PATH, Complete, Prompt, ScriptedComplete};
 pub use cost::Ledger;
+pub use embed::{EMBEDDINGS_PATH, Embed, EmbedRequest, Embedding, ScriptedEmbeddings};
 pub use error::Error;
 pub use http::{
     API_KEY_ENV, BASE_URL_ENV, DECIDE_PATH, DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_TIMEOUT,

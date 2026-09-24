@@ -86,6 +86,13 @@ pub enum Error {
     #[error("completion returned no usable content")]
     EmptyCompletion,
 
+    /// An [`crate::embed::Embed::embed`] call decoded fine but carried no
+    /// vector -- the same "nothing usable" case as [`Error::EmptyCompletion`],
+    /// rather than silently handing a caller an empty vector that every
+    /// cosine against it would score as zero.
+    #[error("embeddings returned no vector")]
+    EmptyEmbedding,
+
     /// A streamed completion that reasoned and never answered: every token
     /// went to reasoning, usually because `max_tokens` ran out first. Lower
     /// the prompt's reasoning effort or raise its budget.
