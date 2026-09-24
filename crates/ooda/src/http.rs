@@ -359,7 +359,7 @@ pub(crate) fn decode_response(
     Ok(Outcome::new(answers, usage, resolved_model))
 }
 
-fn raw_usage(value: &Value) -> Option<Usage> {
+pub(crate) fn raw_usage(value: &Value) -> Option<Usage> {
     value
         .get("usage")
         .and_then(|u| serde_json::from_value(u.clone()).ok())
@@ -371,7 +371,7 @@ fn raw_usage(value: &Value) -> Option<Usage> {
 /// (`{"error": {"message": "...", "type": "..."}}`) — accept either so a
 /// spec change in one direction doesn't silently stop being recognized as an
 /// error.
-fn extract_error_message(value: &Value) -> Option<String> {
+pub(crate) fn extract_error_message(value: &Value) -> Option<String> {
     let err = value.get("error")?;
     if let Some(s) = err.as_str() {
         return Some(s.to_owned());
