@@ -62,6 +62,7 @@ mod gpc1;
 mod http;
 mod numeric;
 mod question;
+mod schema_fallback;
 mod scripted;
 mod speculate;
 mod stage;
@@ -85,6 +86,7 @@ pub use numeric::{
     NumericOutcome, NumericRequest,
 };
 pub use question::{Answer, Criteria, Question, Usage};
+pub use schema_fallback::{JsonSchemaPredictor, WithFallback};
 pub use scripted::ScriptedClient;
 pub use speculate::{Resolved, Speculation, decide_speculative};
 pub use stage::{MAX_STAGES, decide_staged};

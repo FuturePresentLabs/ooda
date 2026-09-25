@@ -158,7 +158,7 @@ pub(crate) fn validate_numeric_outcome(
                 )));
             }
         }
-        if estimate.probabilities.len() != 101
+        if (!estimate.probabilities.is_empty() && estimate.probabilities.len() != 101)
             || estimate
                 .probabilities
                 .iter()
@@ -209,7 +209,8 @@ pub(crate) fn validate_joint_outcome(
             "selected joint record was not the supplied row at selected_index".into(),
         ));
     }
-    if outcome.probabilities.len() != request.allowed_records.len()
+    if (!outcome.probabilities.is_empty()
+        && outcome.probabilities.len() != request.allowed_records.len())
         || outcome
             .probabilities
             .iter()
