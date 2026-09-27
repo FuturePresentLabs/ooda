@@ -249,17 +249,32 @@ impl HttpClient {
         url: &str,
         body: &Value,
     ) -> Result<(reqwest::blocking::Response, Option<String>, std::time::Instant, u32), Error> {
+        self.send_request(url, |builder| {
+            builder
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .json(body)
+        })
+    }
+
+    /// [`HttpClient::send`]'s retry loop, generalized over how the request is
+    /// built, so the audio routes ([`crate::Stt`]'s multipart upload,
+    /// [`crate::Tts`]'s raw-byte response) share one 429/5xx/transport story
+    /// instead of each growing its own. `build` receives a `RequestBuilder`
+    /// already carrying this client's bearer auth, and is re-invoked on every
+    /// attempt.
+    pub(crate) fn send_request<F>(
+        &self,
+        url: &str,
+        build: F,
+    ) -> Result<(reqwest::blocking::Response, Option<String>, std::time::Instant, u32), Error>
+    where
+        F: Fn(reqwest::blocking::RequestBuilder) -> reqwest::blocking::RequestBuilder,
+    {
         let mut attempt: u32 = 0;
         loop {
             attempt += 1;
             let call_started = std::time::Instant::now();
-            let response = self
-                .http
-                .post(url)
-                .bearer_auth(&self.api_key)
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .json(body)
-                .send();
+            let response = build(self.http.post(url).bearer_auth(&self.api_key)).send();
 
             let response = match response {
                 Ok(r) => r,

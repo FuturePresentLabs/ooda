@@ -93,6 +93,16 @@ pub enum Error {
     #[error("embeddings returned no vector")]
     EmptyEmbedding,
 
+    /// An [`crate::Stt::transcribe`] call decoded fine but carried neither text
+    /// nor segments -- nothing usable, rather than an empty transcript a caller
+    /// might silently hand to a display.
+    #[error("transcription returned no text or segments")]
+    EmptyTranscript,
+
+    /// A [`crate::Tts::speak`] call returned no audio bytes.
+    #[error("speech synthesis returned no audio")]
+    EmptySpeech,
+
     /// A streamed completion that reasoned and never answered: every token
     /// went to reasoning, usually because `max_tokens` ran out first. Lower
     /// the prompt's reasoning effort or raise its budget.

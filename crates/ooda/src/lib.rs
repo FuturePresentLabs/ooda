@@ -64,7 +64,9 @@ mod question;
 mod scripted;
 mod speculate;
 mod stage;
+mod stt;
 mod trace;
+mod tts;
 
 pub use best::RunningBest;
 #[cfg(feature = "capture")]
@@ -83,7 +85,9 @@ pub use question::{Answer, Criteria, Question, Usage};
 pub use scripted::ScriptedClient;
 pub use speculate::{Resolved, Speculation, decide_speculative};
 pub use stage::{MAX_STAGES, decide_staged};
+pub use stt::{ScriptedStt, Segment, Stt, SttRequest, Transcript, TRANSCRIPTIONS_PATH, Word};
 pub use trace::{Kind, Record, Trace};
+pub use tts::{SPEECH_PATH, ScriptedTts, Speech, SpeechRequest, Tts};
 
 #[cfg(feature = "derive")]
 pub use choice::Choice;
