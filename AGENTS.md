@@ -1,4 +1,4 @@
-<!-- BEGIN MARBLES integration v0.1.0 profile:conservative hash:a77a0f -->
+<!-- BEGIN MARBLES integration v0.1.0 profile:maintainer hash:2ce4c5 -->
 
 ## Marbles issue tracker
 
@@ -26,9 +26,21 @@ Claims carry TTLs. Agent claims are minutes long and renewed by heartbeats; an e
 agent claim re-queues automatically. Human holds are business-hours long and, when they
 lapse, escalate to the owner rather than silently re-queuing.
 
-### Git policy
+### Git hygiene (this fleet runs hot — non-negotiable)
 
-Do not create commits or push unless the repository instructions or the user
-explicitly allow it. Report changed files and the commands you would run.
+- **Commit early, commit often.** Verified work lands as a local commit per intent,
+referencing the marble id in the message (`mb show` it, mention it). Uncommitted
+work is work that does not exist when your session dies.
+- **No stale checkouts.** Rebase onto the base branch at claim time and before any
+diff-dependent operation. A checkout older than four hours must rebase or be
+discarded; never build on code you have not refreshed.
+- **No dirty exits.** A session that ends with uncommitted changes either commits
+them (preferred) or releases the claim with the state recorded via `mb touch` +
+notes. A dirty tree with no live claim is a finding, not a to-do.
+- **Claims serialize, pushes are separate authority.** Taking work is free and
+atomic; opening PRs and pushing belongs to the delivery loop with the
+host-held credential. An agent process never receives a push credential.
+- **Release rather than hoard.** If you are done reading and not starting, `mb
+release` beats holding. Expired-by-accident claims double the next agent's work.
 
 <!-- END MARBLES INTEGRATION -->
