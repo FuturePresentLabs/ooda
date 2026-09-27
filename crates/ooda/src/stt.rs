@@ -44,12 +44,21 @@ pub struct Segment {
 
 /// A transcript: the whole text, its timed segments, and what the endpoint
 /// reported about how it was produced.
+///
+/// `segments` and `words` are independent: a line-oriented backend fills
+/// `segments` (each with its own `words`); a word-oriented one (`fpl/stt`'s
+/// Nemotron backend, observed live: `segments: []`, `words: N`) fills only the
+/// top-level `words`. Both are surfaced — a caller that needs lines can group
+/// `words` itself, and one that only wants words never has them dropped.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Transcript {
     pub text: String,
     pub language: Option<String>,
     pub duration: Option<f64>,
     pub segments: Vec<Segment>,
+    /// Every timed word, flattened from segments when the backend did not send
+    /// them at the top level.
+    pub words: Vec<Word>,
     pub model: Option<String>,
 }
 
@@ -208,7 +217,7 @@ pub(crate) fn decode_transcript(
         return Err(Error::EmptyTranscript);
     }
     let top_words: Vec<Word> = raw.words.iter().map(RawWord::to_word).collect();
-    let segments = raw
+    let segments: Vec<Segment> = raw
         .segments
         .into_iter()
         .map(|segment| {
@@ -229,11 +238,19 @@ pub(crate) fn decode_transcript(
             }
         })
         .collect();
+    // Prefer the backend's own top-level words; otherwise flatten the segment
+    // words so a word-oriented consumer still gets everything.
+    let words = if top_words.is_empty() {
+        segments.iter().flat_map(|s| s.words.iter().cloned()).collect()
+    } else {
+        top_words
+    };
     Ok(Transcript {
         text: raw.text,
         language: raw.language,
         duration: raw.duration,
         segments,
+        words,
         model: resolved_model.or(raw.model),
     })
 }
@@ -309,6 +326,23 @@ mod tests {
         let transcript = decode_transcript(&value, None).unwrap();
         assert_eq!(transcript.segments[0].words.len(), 1);
         assert_eq!(transcript.segments[1].words[0].word, "b");
+    }
+
+    #[test]
+    fn keeps_top_level_words_when_there_are_no_segments() {
+        // Exactly the live `fpl/stt` (Nemotron) shape: words, no segments.
+        let body = r#"{
+            "text": "hello world",
+            "duration": 2.5,
+            "words": [{"word": "hello", "start": 0.0, "end": 1.0, "confidence": 1},
+                      {"word": "world", "start": 1.0, "end": 2.5, "confidence": 1}]
+        }"#;
+        let value: Value = serde_json::from_str(body).unwrap();
+        let transcript = decode_transcript(&value, None).unwrap();
+        assert!(transcript.segments.is_empty());
+        assert_eq!(transcript.words.len(), 2);
+        assert_eq!(transcript.words[0].word, "hello");
+        assert_eq!(transcript.words[1].end, 2.5);
     }
 
     #[test]
